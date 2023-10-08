@@ -3,28 +3,31 @@ from collections import defaultdict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import UUID4, ValidationError
 
-from schemas import Auth, Client, DnDStatus
+from schemas import Auth, Client, DnDStatus, Room
 
 app = FastAPI()
 
 
 class ClientManager:
     def __init__(self):
-        self.active_connections: dict[str, list[Client]] = defaultdict(list)
+        self.active_connections: dict[str, Room] = defaultdict(Room)
 
     async def connect(self, client: Client):
-        self.active_connections[client.room].append(client)
+        if status := self.active_connections[client.room].status:
+            await client.websocket.send_text(status.model_dump_json())
+        self.active_connections[client.room].clients.append(client)
 
     async def disconnect(self, client: Client):
-        self.active_connections[client.room].remove(client)
+        self.active_connections[client.room].clients.remove(client)
         if client.websocket:
             await client.websocket.close()
 
-    async def broadcast(self, data: str, room_id: str):
-        for client in self.active_connections[room_id]:
+    async def broadcast(self, status: DnDStatus):
+        self.active_connections[status.room].status = status
+        for client in self.active_connections[status.room].clients:
             if not client.websocket:
                 continue
-            await client.websocket.send_text(data)
+            await client.websocket.send_text(status.model_dump_json())
 
 
 manager = ClientManager()
@@ -52,10 +55,17 @@ async def connect_room(websocket: WebSocket):
 
 @app.post("/rooms/change_status/")
 async def change_dnd_status(status: DnDStatus) -> DnDStatus:
-    await manager.broadcast(status.model_dump_json(), status.room)
+    await manager.broadcast(status)
     return status
+
+
+@app.get("/rooms/status/")
+async def get_dnd_status(auth: Auth) -> DnDStatus | None:
+    return manager.active_connections[auth.room].status
 
 
 @app.get("/rooms/client_list/")
 async def room_list(auth: Auth) -> list[UUID4]:
-    return [client.client_id for client in manager.active_connections[auth.room]]
+    return [
+        client.client_id for client in manager.active_connections[auth.room].clients
+    ]

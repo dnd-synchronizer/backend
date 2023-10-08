@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 from pydantic import UUID4, BaseModel
@@ -26,3 +26,9 @@ class Client:
 
     def __eq__(self, other):
         return self.client_id == other.client_id
+
+
+@dataclass
+class Room:
+    clients: list[Client] = field(default_factory=list)
+    status: DnDStatus | None = None
