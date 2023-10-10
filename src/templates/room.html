@@ -1,10 +1,11 @@
 {% extends 'base.html' %}
 {% block content %}
-{% if room.status and room.status.status %}
+{% if room.status %}
 <h1 class="text-center"><i class="bi bi-moon-fill" style="color: #685CDC"></i> {{ room_name }}</h1>
 {% else %}
 <h1 class="text-center">{{ room_name }}</h1>
 {% endif %}
+{{room}}
 <div class="row row-cols-1 row-cols-md-2 g-4">
     {% for client in room.clients %}
     <div class="col">
@@ -20,7 +21,7 @@
             </svg>
             {% endif %}
             <div class="card-body">
-                <h5 class="card-title text-center">{{client.client_id}}</h5>
+                <h5 class="card-title text-center">{{client.id}}</h5>
             </div>
         </div>
     </div>
