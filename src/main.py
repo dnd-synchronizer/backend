@@ -1,71 +1,39 @@
-from collections import defaultdict
+from typing import Annotated
+from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pydantic import UUID4, ValidationError
+from fastapi import Cookie, FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 
-from schemas import Auth, Client, DnDStatus, Room
+from manager import manager
+from ws import router
 
 app = FastAPI()
+app.include_router(router)
+
+templates = Jinja2Templates(directory="templates")
 
 
-class ClientManager:
-    def __init__(self):
-        self.active_connections: dict[str, Room] = defaultdict(Room)
-
-    async def connect(self, client: Client):
-        if status := self.active_connections[client.room].status:
-            await client.websocket.send_text(status.model_dump_json())
-        self.active_connections[client.room].clients.append(client)
-
-    async def disconnect(self, client: Client):
-        self.active_connections[client.room].clients.remove(client)
-        if client.websocket:
-            await client.websocket.close()
-
-    async def broadcast(self, status: DnDStatus):
-        self.active_connections[status.room].status = status
-        for client in self.active_connections[status.room].clients:
-            if not client.websocket:
-                continue
-            await client.websocket.send_text(status.model_dump_json())
+@app.get("/", response_class=HTMLResponse)
+async def homepage(request: Request, room_name: Annotated[str | None, Cookie()] = None):
+    if room_name:
+        return RedirectResponse(url=f"/rooms/{room_name}", status_code=303)
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
-manager = ClientManager()
+@app.post("/rooms/create_random_room", response_class=HTMLResponse)
+async def create_random_room(request: Request):
+    room_name = str(uuid4()).split("-")[0]
+    manager.active_connections[room_name]
+    response = RedirectResponse(url=f"/rooms/{room_name}", status_code=303)
+    response.set_cookie("room_name", room_name)
+    return response
 
 
-@app.websocket("/ws/rooms/")
-async def connect_room(websocket: WebSocket):
-    await websocket.accept()
-    auth_data = await websocket.receive_json()
-    try:
-        auth = Auth(**auth_data)
-        client = Client(**auth.model_dump(), websocket=websocket)
-    except ValidationError as e:
-        await websocket.send_text(e.json())
-        await websocket.close()
-        return
-    await manager.connect(client)
-    try:
-        while True:
-            await websocket.receive_text()
-            await websocket.send_text("ping")
-    except WebSocketDisconnect:
-        await manager.disconnect(client)
-
-
-@app.post("/rooms/change_status/")
-async def change_dnd_status(status: DnDStatus) -> DnDStatus:
-    await manager.broadcast(status)
-    return status
-
-
-@app.get("/rooms/status/")
-async def get_dnd_status(auth: Auth) -> DnDStatus | None:
-    return manager.active_connections[auth.room].status
-
-
-@app.get("/rooms/client_list/")
-async def room_list(auth: Auth) -> list[UUID4]:
-    return [
-        client.client_id for client in manager.active_connections[auth.room].clients
-    ]
+@app.get("/rooms/{room_name}", response_class=HTMLResponse)
+async def room(request: Request, room_name: str):
+    room = manager.active_connections[room_name]
+    return templates.TemplateResponse(
+        "room.html",
+        {"request": request, "room_name": room_name, "room": room},
+    )

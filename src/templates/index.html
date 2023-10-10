@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-center">
+    <form action="rooms/create_random_room" method="POST">
+        <button type="submit" class="btn btn-primary">Create room</button>
+    </form>
+</div>
+{% endblock %}
